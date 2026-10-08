@@ -17,7 +17,7 @@ from Utils.patch_generator_5frame import (
     generate_patch_memory_efficient_gainfix, generate_patch_memory_efficient_dm4,
     generate_patch_img, generate_patch_dm4_frames)
 from Utils.Dataloader_mrc import (
-    Sequentialloader, TestLoader_mrc, TestLoader_dm4, TestLoader_large, TestLoader_large_dm4,
+    Sequentialloader, Sequentialloader_dm4, TestLoader_mrc, TestLoader_dm4, TestLoader_large, TestLoader_large_dm4,
     TestLoader_single, TestLoader_single_dm4)
 from Utils.Dataloader_N2V import Sequentialloader_N2V
 from Utils.Dataloader_plain import Sequentialloader_plain, TestLoader_plain
@@ -102,6 +102,11 @@ def cli_main():
     parser.add_argument('--time_stamp', type=str, default=time_stamp)
     args = parser.parse_args()
 
+    # single-frame modes use exactly one input frame
+    if args.file_type in ('single', 'single_dm4', 'single_mrc') and args.frame_num != 1:
+        print(f"file_type={args.file_type} uses one frame; overriding --frame_num={args.frame_num} -> 1")
+        args.frame_num = 1
+
     # -------------
     # prepare_patch
     # -------------
@@ -154,7 +159,10 @@ def cli_main():
     testset = None
     
     if args.train:
-        if args.file_type in ['mrc', 'large', 'single', 'dm4', 'large_dm4', 'single_dm4']:
+        if args.file_type == 'single_dm4' and args.patches_folder is None:
+            # no patches: read and crop single dm4 frames directly
+            trainset, validationset = Sequentialloader_dm4(args.training_path, args.img_size, patch_size=args.patch_size, gain_dir=args.gain_path, validation_length=2*args.batch_size*args.gpus, recursive_factor=args.recursive_factor)
+        elif args.file_type in ['mrc', 'large', 'single', 'dm4', 'large_dm4', 'single_dm4']:
             trainset, validationset = Sequentialloader(args.patches_folder, args.img_size, gt_path=args.gt_path, validation_length=2*args.batch_size*args.gpus, recursive_factor=args.recursive_factor, frame_num=args.frame_num)
         elif args.model == 'N2V':
             trainset, validationset = Sequentialloader_N2V(args.training_path, args.img_size, gt_path=args.gt_path, validation_length=2*args.batch_size*args.gpus, recursive_factor=args.recursive_factor)
@@ -173,11 +181,11 @@ def cli_main():
         elif args.file_type == 'large':
             testset = TestLoader_large(args.data_path_test, subset=args.subset_size, frame_num=args.frame_num)
         elif args.file_type == 'large_dm4':
-            testset = TestLoader_large_dm4(args.data_path_test, subset=args.subset_size, frame_num=args.frame_num)
+            testset = TestLoader_large_dm4(args.data_path_test, subset=args.subset_size, gain_dir=args.gain_path, frame_num=args.frame_num)
         elif args.file_type == 'single':
             testset = TestLoader_single(args.data_path_test, subset=args.subset_size)
         elif args.file_type == 'single_dm4':
-            testset = TestLoader_single_dm4(args.data_path_test, subset=args.subset_size)
+            testset = TestLoader_single_dm4(args.data_path_test, subset=args.subset_size, gain_dir=args.gain_path)
         else:
             testset = TestLoader_plain(args.data_path_test, frame_num=args.frame_num)
 
