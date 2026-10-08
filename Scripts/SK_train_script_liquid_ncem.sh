@@ -1,0 +1,24 @@
+python3 ../main.py \
+--file_type='large_dm4' \
+--common_path=/mnt/k/Sungsu/KCl-denoised/SK_KCl_20/ \
+--training_path=/mnt/l/Sungsu/KCl/SK_KCl_20/Hour_00/Minute_00 \
+--patches_folder=/mnt/k/Sungsu/KCl-denoised/SK_KCl_20_patches \
+--data_path_test=/mnt/l/Sungsu/KCl/SK_KCl_20/Hour_00/Minute_00 \
+--patch_ratio=0.1 \
+--patch_size=1024 \
+--patch_stride=640 \
+--save_folder_name=experiment \
+--version_folder_name=3x3_blind_spot \
+--model=3x3_blind  \
+--img_size=256 \
+--batch_size=8 \
+--max_epochs=100 \
+--learning_rate=0.001 \
+--loss_function='L2' \
+--precision=16 \
+--recursive_factor=1 \
+--prepare_patch=1 \
+--train=1 \
+--test=1 \
+--gpus=1
+

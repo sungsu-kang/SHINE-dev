@@ -1,0 +1,23 @@
+python3 ../main.py \
+--file_type="single" \
+--common_path="/mnt/k/Chenqi/20261001/Denoised/" \
+--training_path="/mnt/k/Chenqi/20261001/tiff/" \
+--data_path_test="/mnt/k/Chenqi/20261001/tiff/" \
+--patches_folder="/mnt/k/Chenqi/20261001/patches/" \
+--patch_size=512 \
+--patch_stride=256 \
+--patch_ratio=1 \
+--save_folder_name=experiment \
+--version_folder_name=3x3_blind_spot \
+--model=3x3_blind \
+--img_size=256 \
+--batch_size=8 \
+--max_epochs=100 \
+--recursive_factor=1 \
+--frame_num=1 \
+--learning_rate=0.001 \
+--precision=16 \
+--loss_function='L2' \
+--prepare_patch=1 \
+--train=1 \
+--test=1

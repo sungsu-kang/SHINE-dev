@@ -1,0 +1,24 @@
+python3 ../main.py \
+--file_type='large' \
+--common_path=../Experiment/InP_5x5_denoising \
+--training_path=../Datasets/InP9_tif \
+--patches_folder=../Datasets/InP9_tif_patches \
+--gt_path=../Datasets/InP9_tif \
+--data_path_test=../Datasets/InP9_tif \
+--patch_ratio=0.2 \
+--patch_size=1024 \
+--save_folder_name=experiment \
+--version_folder_name=5x5_blind_spot \
+--model=5x5_blind  \
+--img_size=256 \
+--batch_size=16 \
+--max_epochs=50 \
+--recursive_factor=10 \
+--learning_rate=0.001 \
+--precision=16 \
+--loss_function='L2' \
+--prepare_patch=0 \
+--train=1 \
+--test=1 \
+--gpus=1 
+# --ckpt_path=../Experiment/Au_3x3_denoising/model/epoch=38.ckpt

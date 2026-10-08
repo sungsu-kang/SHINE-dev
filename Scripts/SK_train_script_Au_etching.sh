@@ -1,0 +1,24 @@
+python3 ../main.py \
+--file_type='large_dm4' \
+--common_path=../Experiment/20251026_Capture6_CdSe \
+--training_path=../Datasets/NCEM-2025/Capture6_dm4 \
+--patches_folder=../Datasets/NCEM-2025/Capture6_dm4_patches \
+--data_path_test=../Datasets/NCEM-2025/Capture6_dm4 \
+--patch_ratio=0.1 \
+--patch_size=1024 \
+--patch_stride=640 \
+--save_folder_name=experiment \
+--version_folder_name=3x3_blind_spot \
+--model=3x3_blind  \
+--img_size=256 \
+--batch_size=16 \
+--max_epochs=100 \
+--learning_rate=0.001 \
+--loss_function='L2' \
+--precision=16 \
+--recursive_factor=1 \
+--prepare_patch=1 \
+--train=1 \
+--test=1 \
+--gpus=1
+#--ckpt_path=../Experiment/20251026_Capture6_CdSe/experiment20260116/model/epoch=2.ckpt

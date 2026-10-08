@@ -1,0 +1,18 @@
+python3 ../main.py \
+--common_path=../Experiment/whale \
+--training_path=../Datasets/whale \
+--data_path_test=../Datasets/whale \
+--save_folder_name=experiment \
+--version_folder_name=3x3_blind_spot \
+--model=3x3_blind  \
+--img_size=256 \
+--batch_size=16 \
+--max_epochs=100 \
+--recursive_factor=50 \
+--learning_rate=0.001 \
+--precision=16 \
+--loss_function='L2' \
+--train=0 \
+--test=1 \
+--gpus=1 \
+--ckpt_path=../Experiment/whale/experiment20260128/model/epoch=25.ckpt

@@ -1,0 +1,23 @@
+python3 ../main.py \
+--file_type='large_dm4' \
+--common_path=../Experiment/third-8us \
+--training_path=../Datasets/Samsung/3-8us \
+--data_path_test=../Datasets/Samsung/3-8us \
+--patches_folder=../Datasets/Samsung/3-8us-patches \
+--patch_ratio=1.0 \
+--patch_size=256 \
+--save_folder_name=experiment \
+--version_folder_name=1x1_blind_spot \
+--model=1x1_blind  \
+--img_size=256 \
+--batch_size=8 \
+--max_epochs=100 \
+--recursive_factor=50 \
+--learning_rate=0.001 \
+--precision=16 \
+--frame_num=1 \
+--loss_function='L2' \
+--prepare_patch=1 \
+--train=1 \
+--test=1 \
+--gpus=1 
