@@ -5,6 +5,7 @@ the raw stacks / frame folders directly. Plain TIF folders ('Image') live in Dat
 """
 import os
 import random
+from functools import lru_cache
 import numpy as np
 import torch
 import cv2 as cv
@@ -13,6 +14,9 @@ import ncempy.io.dm as dm
 from torch.utils.data import Dataset
 import torchvision.transforms.v2 as T
 from Utils.Utils import torch_zscore_normalize, idxreturn
+
+def _list_tifs(d):
+    return sorted(f for f in os.listdir(d) if f.lower().endswith(('.tif', '.tiff')))
 
 def imageloader(path,index,total_length,list):
     image_path = os.path.join(path,list[index])
@@ -99,10 +103,95 @@ class ValidationLoader(Dataset):
         batch_processed = torch_zscore_normalize(batch_processed)
         return batch_processed
 
+def _list_dm4(image_dir):
+    """Relative paths of all .dm4 files below image_dir (same search as the patch generator)."""
+    return sorted(os.path.relpath(os.path.join(root, f), image_dir)
+                  for root, _, files in os.walk(image_dir) for f in files if f.endswith('.dm4'))
+
+def _load_gain(gain_dir):
+    if gain_dir is None or gain_dir == 'None':
+        return None
+    if gain_dir.endswith('.dm4'):
+        g_data = dm.fileDM(gain_dir).getDataset(0)
+        g_data = g_data['data'] if isinstance(g_data, dict) else g_data
+    else:
+        with mrcfile.open(gain_dir, permissive=True) as mrc:
+            g_data = mrc.data
+    return np.flipud(g_data).astype(np.float32).copy()
+
+@lru_cache(maxsize=16)
+def _read_dm4(path):
+    data = dm.fileDM(path).getDataset(0)
+    return (data['data'] if isinstance(data, dict) else data).astype(np.float32)
+
+def Sequentialloader_dm4(image_dir, image_size, patch_size=1024, gain_dir=None, validation_length=1, recursive_factor=1):
+    """Train/validation sets that read single dm4 frames directly (no *.npz patches needed)."""
+    image_list = _list_dm4(image_dir)
+    total_length = len(image_list)
+    training_length = total_length - validation_length
+    index = random.sample(list(range(0, total_length)), total_length)
+    gain = _load_gain(gain_dir)
+    Trainset = TrainLoader_dm4(image_dir, image_list, index[:training_length], image_size, patch_size, gain, recursive_factor)
+    Validationset = ValidationLoader_dm4(image_dir, image_list, index[training_length:], image_size, gain)
+    return Trainset, Validationset
+
+class TrainLoader_dm4(Dataset):
+    """Single-frame training samples cropped on the fly from dm4 files.
+
+    Equivalent to TrainLoader on patches from generate_patch_dm4_frames(frames=1): a random
+    patch_size x patch_size region is cut from a frame, then the same resize/crop/flip/rotation
+    augmentation is applied.
+    """
+    def __init__(self, image_dir, image_list, index, image_size, patch_size, gain, recursive_factor):
+        self.image_dir = image_dir
+        self.image_list = image_list
+        self.index = index
+        self.patch_size = patch_size
+        self.gain = gain
+        self.recursive_factor = recursive_factor
+        self.transforms = T.Compose([
+        T.RandomResize(max(256,image_size),max(1024,image_size+1),interpolation=T.InterpolationMode.NEAREST),
+        T.RandomCrop(image_size),
+        T.RandomHorizontalFlip(0.50),
+        T.RandomVerticalFlip(0.5),
+        T.RandomApply([T.RandomRotation((90, 90))], 0.5),
+        ])
+
+    def __len__(self):
+        return int(len(self.index)*self.recursive_factor)
+
+    def __getitem__(self, idx):
+        path = os.path.join(self.image_dir, self.image_list[self.index[idx % len(self.index)]])
+        img = _read_dm4(path)
+        if self.gain is not None:
+            img = img * self.gain
+        h, w = img.shape
+        ph, pw = min(self.patch_size, h), min(self.patch_size, w)
+        i, j = random.randint(0, h-ph), random.randint(0, w-pw)
+        patch = torch.from_numpy(np.ascontiguousarray(img[i:i+ph, j:j+pw])).unsqueeze(0)
+        return torch_zscore_normalize(self.transforms(patch))
+
+class ValidationLoader_dm4(Dataset):
+    def __init__(self, image_dir, image_list, index, image_size, gain):
+        self.image_dir = image_dir
+        self.image_list = image_list
+        self.index = index
+        self.gain = gain
+        self.transforms = T.CenterCrop(image_size)
+
+    def __len__(self):
+        return len(self.index)
+
+    def __getitem__(self, idx):
+        img = _read_dm4(os.path.join(self.image_dir, self.image_list[self.index[idx]]))
+        if self.gain is not None:
+            img = img * self.gain
+        return torch_zscore_normalize(self.transforms(torch.from_numpy(img).unsqueeze(0)))
+
 class TestLoader_large(Dataset):
     def __init__(self,image_dir,subset=None,frame_num=5):
         self.image_dir = image_dir
-        self.image_list = sorted(f for f in os.listdir(image_dir) if f.lower().endswith(('.tif', '.tiff')))
+        self.image_list = _list_tifs(image_dir)
         self.total_length = len(self.image_list)
         self.frame_num = frame_num
         self.subset = subset if subset is not None else self.total_length
@@ -271,12 +360,8 @@ class TestLoader_large_dm4(Dataset):
 class TestLoader_single(Dataset):
     def __init__(self,image_dir,subset=None):
         self.image_dir = image_dir
-        self.image_list = sorted(os.listdir(image_dir))
-        self.total_length = len(os.listdir(image_dir))
-        #self.transforms = T.Compose([
-        #T.ConvertImageDtype(torch.float),
-        #T.Normalize([0], [1])
-        #])
+        self.image_list = _list_tifs(image_dir)
+        self.total_length = len(self.image_list)
         if subset is not None:
             self.subset=subset
         else:
@@ -288,17 +373,14 @@ class TestLoader_single(Dataset):
     def __getitem__(self, idx): 
         previous_in = imageloader(self.image_dir,idx,self.total_length,self.image_list)
         img_name = self.image_list[idx]
-        batch_image = previous_in.unsqueeze(0)
-        batch_processed = batch_image
-        #batch_processed = self.transforms(batch_image)
-        previous_out = batch_processed[0, :, :]
-        return previous_out, idx, img_name
+        return previous_in, idx, img_name
     
 class TestLoader_single_dm4(Dataset):
     def __init__(self, image_dir, subset=None, gain_dir=None):
         self.image_dir = image_dir
         
-        self.image_list = sorted([f for f in os.listdir(image_dir) if f.endswith('.dm4')])
+        # all .dm4 files below image_dir (same search as the patch generator and large_dm4)
+        self.image_list = _list_dm4(image_dir)
         self.total_length = len(self.image_list)
 
         if subset is not None:
@@ -306,24 +388,16 @@ class TestLoader_single_dm4(Dataset):
         else:
             self.subset = self.total_length
 
-        self.gain_value = None
-        if gain_dir is not None and gain_dir != 'None':
-            if gain_dir.endswith('.dm4'):
-                g_obj = dm.fileDM(gain_dir)
-                g_data = g_obj.getDataset(0)
-                g_data = g_data['data'] if isinstance(g_data, dict) else g_data
-            else:
-                with mrcfile.open(gain_dir, permissive=True) as mrc:
-                    g_data = mrc.data
-            
-            self.gain_value = np.flipud(g_data).astype(np.float32)
+        self.gain_value = _load_gain(gain_dir)
 
     def __len__(self):
         return int(self.subset)        
 
     def __getitem__(self, idx): 
-        img_name = self.image_list[idx]
-        file_path = os.path.join(self.image_dir, img_name)
+        rel_path = self.image_list[idx]
+        file_path = os.path.join(self.image_dir, rel_path)
+        # 'folderA/image.dm4' -> 'folderA_image.tif' (flat output folder)
+        img_name = rel_path.replace('.dm4', '.tif').replace('/', '_').replace('\\', '_')
         
         try:
             dm_obj = dm.fileDM(file_path)
@@ -331,7 +405,7 @@ class TestLoader_single_dm4(Dataset):
             img = img_data['data'] if isinstance(img_data, dict) else img_data
             img = img.astype(np.float32)
         except Exception as e:
-            print(f"Error reading {img_name}: {e}")
+            print(f"Error reading {rel_path}: {e}")
             img = np.zeros((1024, 1024), dtype=np.float32) # Assume standard size or handle dynamic
 
         if self.gain_value is not None:
