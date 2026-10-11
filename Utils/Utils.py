@@ -1,8 +1,10 @@
+from functools import lru_cache
 import torch
 import numpy as np
 import torch.fft
 import torch.nn as nn
 import numba
+from scipy import ndimage as ndi
 
 def idxreturn(idx, stack_num, frame_num):
     """Indices of the frame_num frames centred on idx; at the stack edges the window is mirrored."""
@@ -12,6 +14,29 @@ def idxreturn(idx, stack_num, frame_num):
     if idx < half:
         return [idx+abs(i) for i in range(-half, half+1)]
     return [idx+i for i in range(-half, half+1)]
+
+@lru_cache(maxsize=8)
+def _disk(radius):
+    y, x = np.ogrid[-radius:radius+1, -radius:radius+1]
+    return x*x + y*y <= radius*radius
+
+def remove_outliers(img, radius=3, sigma=5.0):
+    """Replace bright shot-noise spikes by the median of a disk of `radius` px.
+
+    A pixel is an outlier when it exceeds the local median by more than `sigma` robust standard
+    deviations (MAD of the residual, per frame). radius <= 0 disables the filter.
+    """
+    if radius <= 0:
+        return img
+    med = ndi.median_filter(img, footprint=_disk(radius), mode='reflect')
+    res = img - med
+    robust_sigma = np.median(np.abs(res - np.median(res))) * 1.4826
+    if robust_sigma == 0:
+        return img
+    out = img.copy()
+    mask = res > sigma * robust_sigma
+    out[mask] = med[mask]
+    return out
 
 @torch.jit.script
 def torch_zscore_normalize(image):

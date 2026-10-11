@@ -13,6 +13,10 @@ Usage:
     python process_scan.py --file_path /pscratch/sd/s/skang2/4dcam/ \
                             --scanMater MgCl2 --scanNum 16
 
+    # shot-noise spikes are replaced by the local median before the final clip (--outlier_radius 3,
+    # --outlier_sigma 5 by default; --outlier_radius 0 gives the old output). --clip_percentile 100
+    # drops the clip as well.
+
     # or process many scanNums for the same material in one process:
     python process_scan.py --file_path /pscratch/sd/s/skang2/4dcam/ \
                             --scanMater MgCl2 --scanNum 12 13 14 15 16
@@ -26,6 +30,11 @@ from pathlib import Path
 import h5py
 import numpy as np
 from tqdm import tqdm
+
+try:
+    from Utils.Utils import remove_outliers   # imported as part of the package
+except ModuleNotFoundError:
+    from Utils import remove_outliers          # run as a script from Utils/ (Utils = Utils.py)
 
 
 def load_and_dark_correct(h5_path):
@@ -107,24 +116,31 @@ _worker_data = None
 _worker_defect_set = None
 _worker_dark = None
 _worker_gain = None
+_worker_opts = None
 
 
-def _init_worker(data, defect_set, estimated_dark, estimated_gain):
+def _init_worker(data, defect_set, estimated_dark, estimated_gain, opts):
     """Runs once in each worker process; stashes shared arrays as globals
     so process_frame_h5 doesn't need to be (and can't be) pickled per task."""
-    global _worker_data, _worker_defect_set, _worker_dark, _worker_gain
+    global _worker_data, _worker_defect_set, _worker_dark, _worker_gain, _worker_opts
     _worker_data = data
     _worker_defect_set = defect_set
     _worker_dark = estimated_dark
     _worker_gain = estimated_gain
+    _worker_opts = opts
 
 
 def process_frame_h5(ii):
-    data = _worker_data
-    defect_list = _worker_defect_set
-    estimated_dark = _worker_dark
-    estimated_gain = _worker_gain
+    return correct_frame(_worker_data, ii, _worker_defect_set, _worker_dark, _worker_gain, **_worker_opts)
 
+
+def correct_frame(data, ii, defect_list, estimated_dark, estimated_gain,
+                  outlier_radius=0, outlier_sigma=5.0, clip_percentile=98.0):
+    """Per-frame gain/defect correction. Returns (ii, corrected float32 frame).
+
+    outlier_radius > 0 replaces shot-noise spikes by the local median (Utils.Utils.remove_outliers)
+    before the final clip. clip_percentile < 100 clips the frame at that percentile; 100 disables it.
+    """
     if ii in defect_list:
         return ii, np.zeros((576, 576), dtype=np.float32)
 
@@ -168,10 +184,11 @@ def process_frame_h5(ii):
             arr[i, j] = np.random.choice(findarray)
     im_g = arr
 
-    im_max = np.percentile(im_g, 98)
-    im_min = np.percentile(im_g, 0)
-    im_g = np.clip(im_g, im_min, im_max)
     im_g = np.nan_to_num(im_g, nan=0.0)
+    if outlier_radius > 0:
+        im_g = remove_outliers(im_g.astype(np.float32), outlier_radius, outlier_sigma)
+    if clip_percentile < 100:
+        im_g = np.clip(im_g, np.percentile(im_g, 0), np.percentile(im_g, clip_percentile))
 
     if np.isnan(im_g).any():
         print(f"nan slice is detected: {ii}")
@@ -179,7 +196,7 @@ def process_frame_h5(ii):
 
 
 def export_single_h5(data, sz, defect_list, estimated_dark, estimated_gain,
-                      file_path, scanMater, scanNum, n_procs):
+                      file_path, scanMater, scanNum, n_procs, opts):
     """Cell 10: parallel per-frame correction streamed into one HDF5 file."""
     h5_out = file_path / f"{scanMater}_corr" / "data_scan{:010}_gaincorr.h5".format(scanNum)
     os.makedirs(h5_out.parent, exist_ok=True)
@@ -190,7 +207,7 @@ def export_single_h5(data, sz, defect_list, estimated_dark, estimated_gain,
     pool = multiprocessing.Pool(
         processes=n_procs,
         initializer=_init_worker,
-        initargs=(data, defect_set, estimated_dark, estimated_gain),
+        initargs=(data, defect_set, estimated_dark, estimated_gain, opts),
     )
 
     with h5py.File(h5_out, "w") as fout:
@@ -208,6 +225,8 @@ def export_single_h5(data, sz, defect_list, estimated_dark, estimated_gain,
         dset.attrs["scanNum"] = scanNum
         dset.attrs["n_defect_frames"] = len(defect_list)
         dset.attrs["note"] = "gain-corrected; defective frames stored as zero images"
+        for key, value in opts.items():
+            dset.attrs[key] = value
 
         with tqdm(total=sz, desc="gain-correct+write") as pbar:
             for ii, frame in pool.imap_unordered(process_frame_h5, range(sz)):
@@ -219,7 +238,7 @@ def export_single_h5(data, sz, defect_list, estimated_dark, estimated_gain,
     print(f"Saved gain-corrected stack to: {h5_out}")
 
 
-def run_one(file_path, scanMater, scanNum, n_procs):
+def run_one(file_path, scanMater, scanNum, n_procs, opts):
     h5_path = file_path / scanMater / "data_scan{:010}.h5".format(scanNum)
     print(f"\n=== Processing {h5_path} ===")
 
@@ -227,7 +246,7 @@ def run_one(file_path, scanMater, scanNum, n_procs):
     defect_list = detect_defects(data, sz, file_path, scanMater, scanNum)
     estimated_dark, estimated_gain = estimate_dark_gain(data, defect_list)
     export_single_h5(data, sz, defect_list, estimated_dark, estimated_gain,
-                      file_path, scanMater, scanNum, n_procs)
+                      file_path, scanMater, scanNum, n_procs, opts)
 
 
 def main():
@@ -241,13 +260,23 @@ def main():
     parser.add_argument("--n_procs", type=int, default=None,
                          help="Worker processes for per-frame correction "
                               "(default: all CPUs allocated to the job)")
+    parser.add_argument("--outlier_radius", type=int, default=3,
+                         help="Replace shot-noise spikes by the median within this radius (px), "
+                              "before the clip (default 3). 0 = off")
+    parser.add_argument("--outlier_sigma", type=float, default=5.0,
+                         help="A pixel is a spike if it exceeds the local median by this many robust sigmas")
+    parser.add_argument("--clip_percentile", type=float, default=98.0,
+                         help="Clip each corrected frame at this percentile (default 98, the old behaviour); "
+                              "100 = no clip")
     args = parser.parse_args()
+    opts = dict(outlier_radius=args.outlier_radius, outlier_sigma=args.outlier_sigma,
+                clip_percentile=args.clip_percentile)
 
     n_procs = args.n_procs or multiprocessing.cpu_count()
     file_path = Path(args.file_path)
 
     for scanNum in args.scanNum:
-        run_one(file_path, args.scanMater, scanNum, n_procs)
+        run_one(file_path, args.scanMater, scanNum, n_procs, opts)
 
 
 if __name__ == "__main__":
