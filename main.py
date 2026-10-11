@@ -167,7 +167,7 @@ def cli_main():
         elif args.model == 'N2V':
             trainset, validationset = Sequentialloader_N2V(args.training_path, args.img_size, gt_path=args.gt_path, validation_length=2*args.batch_size*args.gpus, recursive_factor=args.recursive_factor)
         else:
-            trainset, validationset = Sequentialloader_plain(args.training_path, args.img_size, validation_length=2*args.batch_size*args.gpus, recursive_factor=args.recursive_factor, frame_num=args.frame_num)  
+            trainset, validationset = Sequentialloader_plain(args.training_path, args.img_size, validation_length=2*args.batch_size*args.gpus, recursive_factor=args.recursive_factor, frame_num=args.frame_num)
         # The Trainer builds the DataLoaders itself (num_workers=args.processor_num).
 
     # ------------
