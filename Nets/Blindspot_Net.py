@@ -213,8 +213,11 @@ class ParamEdgeConv_top_open(nn.Module):
         mask[0, -initial_dilation_j-1:] = 1
         mask[-1, -initial_dilation_j-1:] = 1
 
-        # Register indices as buffer so they live on GPU with the model
-        self.register_buffer('indices', torch.nonzero(mask).t())
+        # Register indices as buffer so they live on GPU with the model. Not persistent: it is
+        # derived from the mask, and old checkpoints do not contain it.
+        self.register_buffer('indices', torch.nonzero(mask).t(), persistent=False)
+        # Old checkpoints stored the full zero kernel as a buffer ('zero_kernel'); drop it on load.
+        self._register_load_state_dict_pre_hook(self._drop_legacy_zero_kernel)
         num_params = int(mask.sum())
 
         self.params = nn.Parameter(torch.Tensor(out_channels, in_channels, num_params))
@@ -226,6 +229,10 @@ class ParamEdgeConv_top_open(nn.Module):
         # Store shapes needed for kernel construction
         self.out_channels = out_channels
         self.in_channels_per_group = in_channels // groups
+
+    @staticmethod
+    def _drop_legacy_zero_kernel(state_dict, prefix, *args):
+        state_dict.pop(prefix + 'zero_kernel', None)
 
     def forward(self, x):
         kernel = torch.zeros(
