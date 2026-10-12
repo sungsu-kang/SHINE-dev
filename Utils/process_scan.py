@@ -275,8 +275,19 @@ def main():
     n_procs = args.n_procs or multiprocessing.cpu_count()
     file_path = Path(args.file_path)
 
+    failed = []
     for scanNum in args.scanNum:
-        run_one(file_path, args.scanMater, scanNum, n_procs, opts)
+        try:
+            run_one(file_path, args.scanMater, scanNum, n_procs, opts)
+        except (OSError, KeyError) as e:      # truncated/corrupt file, or no 'frames' dataset
+            print(f"!!! Skipping scan {scanNum}: {e}")
+            failed.append(scanNum)
+
+    if failed:
+        print(f"\n{len(failed)} scan(s) failed: {' '.join(map(str, failed))}")
+        print("Re-copy these raw files, then rerun with: --scanNum " + " ".join(map(str, failed)))
+        with open(file_path / f"{args.scanMater}_failed_scans.txt", "w") as fh:
+            fh.write("\n".join(map(str, failed)) + "\n")
 
 
 if __name__ == "__main__":
