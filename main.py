@@ -68,6 +68,10 @@ def cli_main():
     parser.add_argument('--beta2', type=float, default=0.999)
     parser.add_argument('--eps', type=float, default=1e-8)
     parser.add_argument('--weight_decay', type=float, default=0)
+    parser.add_argument('--optimizer', type=str, default='muon', choices=['adam', 'muon'],
+                        help='muon (default): Muon (--muon_lr) on hidden conv weights, Adam (--learning_rate) on the rest; adam: Adam on all weights')
+    parser.add_argument('--muon_lr', type=float, default=0.02)
+    parser.add_argument('--muon_momentum', type=float, default=0.95)
     parser.add_argument('--img_size', type=int, default=128)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--predict_batch_size', type=int, default=1)
@@ -218,6 +222,9 @@ def cli_main():
             num_workers=args.processor_num,
             predict_batch_size=args.predict_batch_size,
             tile_size=args.tile_size,
+            optimizer=args.optimizer,
+            muon_lr=args.muon_lr,
+            muon_momentum=args.muon_momentum,
         )
 
     # ------------

@@ -51,7 +51,10 @@ Run the following commands in the terminal with the parameters described below, 
 * `batch_size`: Batch size (default: `32`).
 * `max_epochs`: Total number of training epochs (default: `200`).
 * `recursive_factor`: Using multiplier to speed up training (default: `1`).
-* `learning_rate`: Learning rate for training (default: `0.0001`).
+* `learning_rate`: Learning rate for Adam (all weights with `optimizer=adam`; input/output layers with `optimizer=muon`) (default: `0.0001`).
+* `optimizer`: `muon` (default) or `adam`. `muon` trains the hidden convolution weights with [Muon](https://kellerjordan.github.io/posts/muon/) and the remaining weights with Adam. On the Au dataset it resolved the nanoparticle lattice within ~5 epochs, versus 15-30+ epochs with Adam. Use `adam` to reproduce the original paper settings.
+* `muon_lr`: Learning rate for the Muon weights (default: `0.02`; `0.05` diverged on Au).
+* `muon_momentum`: Muon momentum (default: `0.95`).
 * `precision`: `16` for mixed precision (AMP) or `32`.
 * `loss_function`: Type of loss function used for training (default: `L2`).
 * `train`: Set to `1` to train the model or `0` to skip (default: `1`).

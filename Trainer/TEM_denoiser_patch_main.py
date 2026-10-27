@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from Utils.Muon import MuonWithAuxAdam, split_params
 from Utils.Utils import (idxreturn, clip_top_3_percent, numpy_zscore_normalize_test,
                          numpy_zscore_recover, MixedLoss, FocalFrequencyLoss)
 
@@ -48,7 +49,10 @@ class TEM_denoiser_main(pl.LightningModule):
                 additional_dilation_j,
                 num_workers=8,
                 predict_batch_size=1,
-                tile_size=0):
+                tile_size=0,
+                optimizer='muon',
+                muon_lr=0.02,
+                muon_momentum=0.95):
         super(TEM_denoiser_main, self).__init__()
         self.frame_num=frame_num
         self.prepare_data_per_node=False
@@ -78,12 +82,26 @@ class TEM_denoiser_main(pl.LightningModule):
         # tile_size <= 0: predict runs whole frames up to 1024 px (512 px tiles above that);
         # test (large mrc stacks) keeps 1024 px tiles. A positive value forces that tile size.
         self.tile_size=tile_size
+        self.optimizer_name=optimizer
+        self.muon_lr=muon_lr
+        self.muon_momentum=muon_momentum
         
     def forward(self, x, shuffle=0):
         out = self.model(x, shuffle=shuffle)
         return out
 
     def configure_optimizers(self):
+        if self.optimizer_name == 'muon':
+            # hidden conv weights -> Muon, input/output layers and thin tensors -> Adam
+            muon_params, adam_params = split_params(self.named_parameters())
+            groups = [dict(params=adam_params, use_muon=False, lr=self.learning_rate,
+                           betas=(self.beta1, self.beta2), eps=self.eps, weight_decay=self.weight_decay)]
+            if muon_params:
+                groups.append(dict(params=muon_params, use_muon=True, lr=self.muon_lr,
+                                   momentum=self.muon_momentum, weight_decay=self.weight_decay))
+            return MuonWithAuxAdam(groups)
+        if self.optimizer_name != 'adam':
+            raise ValueError(f'Unknown optimizer: {self.optimizer_name}')
         optimizer1 = torch.optim.Adam(
             self.parameters(),   
             lr=self.learning_rate,
