@@ -19,7 +19,8 @@ def _list_images(d):
     # Skip stray files such as '*.tif:Zone.Identifier'.
     return sorted(n for n in os.listdir(d) if n.lower().endswith(('.tif', '.tiff')))
 
-def Sequentialloader_plain(image_dir, image_size, validation_length=1, recursive_factor=1, frame_num=5):
+def Sequentialloader_plain(image_dir, image_size, validation_length=1, recursive_factor=1, frame_num=5,
+                           temporal_aug_p=0.0):
     image_list = _list_images(image_dir)
     total_length = len(image_list)
     training_length = total_length-validation_length
@@ -28,7 +29,8 @@ def Sequentialloader_plain(image_dir, image_size, validation_length=1, recursive
     v_index = index[training_length:training_length+validation_length]
     paths = [os.path.join(image_dir, n) for n in image_list]
 
-    Trainset = TrainLoader_plain(paths, training_length, total_length,image_size,t_index,recursive_factor,frame_num)
+    Trainset = TrainLoader_plain(paths, training_length, total_length,image_size,t_index,recursive_factor,frame_num,
+                                 temporal_aug_p)
     Validationset = ValidationLoader_plain(paths, validation_length, total_length,image_size,v_index,frame_num)
     return Trainset, Validationset
 
@@ -45,8 +47,47 @@ def gauss_noise_torch(img: torch.Tensor) -> torch.Tensor:
 
     return out
 
+def _feathered_box(h, w, size, sigma=8.0):
+    """Weight map: 1 inside a random size x size box, falling to 0 over ~sigma px outside it."""
+    y0, x0 = random.randint(0, h - size), random.randint(0, w - size)
+    yy = np.arange(h, dtype=np.float32)[:, None]
+    xx = np.arange(w, dtype=np.float32)[None, :]
+    dy = np.maximum(np.maximum(y0 - yy, yy - (y0 + size - 1)), 0)
+    dx = np.maximum(np.maximum(x0 - xx, xx - (x0 + size - 1)), 0)
+    return np.exp(-0.5 * (dy ** 2 + dx ** 2) / sigma ** 2)
+
+
+def corrupt_neighbours(frames, centre_idx, paths, total_length, far=10, shift=(5, 20), box=(128, 512)):
+    """Make some neighbouring frames disagree with the centre frame (in place).
+
+    1 to frame_num-1 neighbours are replaced, either by a frame at least `far` frames away or by
+    themselves shifted 5-20 px, over the whole frame or a feathered random box. The centre frame
+    (the training target) is untouched, so the self-supervised loss stays unbiased; the network
+    learns that neighbours can be wrong and must be checked against the centre frame.
+    Uses `random`, which PyTorch seeds differently in each DataLoader worker.
+    """
+    F, H, W = frames.shape
+    c = F // 2
+    slots = random.sample([k for k in range(F) if k != c], random.randint(1, F - 1))
+    for k in slots:
+        if random.random() < 0.5:
+            far_ids = [i for i in range(total_length) if abs(i - centre_idx) >= far]
+            repl = imageloader(paths[random.choice(far_ids)])
+        else:
+            d = random.uniform(*shift)
+            a = random.uniform(0, 2 * np.pi)
+            repl = np.roll(frames[k], (int(round(d * np.sin(a))), int(round(d * np.cos(a)))), (0, 1))
+        if random.random() < 0.5:
+            frames[k] = repl
+        else:
+            wgt = _feathered_box(H, W, random.randint(min(box[0], H, W), min(box[1], H, W)))
+            frames[k] = (1 - wgt) * frames[k] + wgt * repl
+    return frames
+
+
 class TrainLoader_plain(Dataset):
-    def __init__(self, paths, training_length, total_length,image_size,index,recursive_factor,frame_num):
+    def __init__(self, paths, training_length, total_length,image_size,index,recursive_factor,frame_num,
+                 temporal_aug_p=0.0):
         self.paths = paths
         self.total_length = total_length
         self.training_length = training_length
@@ -58,6 +99,7 @@ class TrainLoader_plain(Dataset):
         self.index = index
         self.recursive_factor =recursive_factor
         self.frame_num = frame_num
+        self.temporal_aug_p = temporal_aug_p
 
     def __len__(self):
         return int(self.training_length*self.recursive_factor)
@@ -69,6 +111,8 @@ class TrainLoader_plain(Dataset):
         idxlist = idxreturn(train_idx, self.total_length, self.frame_num)
 
         images_array = np.stack([imageloader(self.paths[i]) for i in idxlist])
+        if self.frame_num > 1 and random.random() < self.temporal_aug_p:
+            images_array = corrupt_neighbours(images_array, train_idx, self.paths, self.total_length)
         return gauss_noise_torch(torch_zscore_normalize(self.transforms(torch.from_numpy(images_array))))
 
 class ValidationLoader_plain(Dataset):

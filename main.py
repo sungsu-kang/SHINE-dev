@@ -60,6 +60,8 @@ def cli_main():
     parser.add_argument('--in_channels', type=int, default=1)
     parser.add_argument('--out_channels', type=int, default=1)
     parser.add_argument('--frame_num', type=int, default=5)
+    parser.add_argument('--temporal_aug_p', type=float, default=0.0,
+                        help='Image training only: probability that a sample\'s neighbouring frames are made to disagree with the centre frame (reduces temporal smoothing)')
     parser.add_argument('--filter', type=int, default=64)
     parser.add_argument('--blocks', type=int, default=14)
     parser.add_argument('--max_epochs', type=int, default=200)
@@ -171,7 +173,8 @@ def cli_main():
         elif args.model == 'N2V':
             trainset, validationset = Sequentialloader_N2V(args.training_path, args.img_size, gt_path=args.gt_path, validation_length=2*args.batch_size*args.gpus, recursive_factor=args.recursive_factor)
         else:
-            trainset, validationset = Sequentialloader_plain(args.training_path, args.img_size, validation_length=2*args.batch_size*args.gpus, recursive_factor=args.recursive_factor, frame_num=args.frame_num)
+            trainset, validationset = Sequentialloader_plain(args.training_path, args.img_size, validation_length=2*args.batch_size*args.gpus, recursive_factor=args.recursive_factor, frame_num=args.frame_num,
+                                                            temporal_aug_p=args.temporal_aug_p)
         # The Trainer builds the DataLoaders itself (num_workers=args.processor_num).
 
     # ------------
